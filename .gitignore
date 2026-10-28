@@ -1,0 +1,28 @@
+# GNOME Shell Extension build artifacts
+*.shell-extension.zip
+schemas/gschemas.compiled
+
+# Dependency and test artifacts
+node_modules/
+package-lock.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime and local cache files
+.cache/
+*.log
+/tmp/discord-ipc-*
+
+# Temporary and local editor files
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local development and scratch files
+Temp.md
+scratch/

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    name: Run Unit Tests & Schema Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install GLib Schema Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev-bin gnome-shell
+
+      - name: Validate GSettings Schemas
+        run: |
+          glib-compile-schemas --strict schemas/
+
+      - name: Run Test Suite
+        run: |
+          npm test
+
+      - name: Test Extension Packaging
+        run: |
+          make pack

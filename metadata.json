@@ -1,0 +1,10 @@
+{
+    "uuid": "discord-voice-panel@example.com",
+    "name": "Discord Voice Panel",
+    "description": "Show Discord voice channel members in the top bar and toggle mute/deafen.",
+    "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+    "url": "https://github.com/yourname/discord-voice-panel",
+    "settings-schema": "org.gnome.shell.extensions.discord-voice-panel",
+    "gettext-domain": "discord-voice-panel",
+    "version": 6
+}

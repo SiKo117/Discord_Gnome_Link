@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="discord-voice-panel">
+  <schema id="org.gnome.shell.extensions.discord-voice-panel" path="/org/gnome/shell/extensions/discord-voice-panel/">
+    <key name="client-id" type="s">
+      <default>'207646673902501888'</default>
+      <summary>Discord Application Client ID</summary>
+      <description>The OAuth2 Client ID from the Discord Developer Portal (defaults to Discord StreamKit Voice ID 207646673902501888).</description>
+    </key>
+    <key name="access-token" type="s">
+      <default>''</default>
+      <summary>Discord RPC Access Token</summary>
+      <description>Optional OAuth2 access token for Discord RPC control commands.</description>
+    </key>
+    <key name="show-member-count" type="b">
+      <default>true</default>
+      <summary>Show member count in panel</summary>
+      <description>Display the number of active participants in the GNOME Shell top panel.</description>
+    </key>
+    <key name="show-disconnected-icon" type="b">
+      <default>true</default>
+      <summary>Show icon when disconnected</summary>
+      <description>Keep the status icon visible (in dimmed state) when Discord is not running or disconnected.</description>
+    </key>
+    <key name="manual-socket-path" type="s">
+      <default>''</default>
+      <summary>Manual Discord socket path</summary>
+      <description>Exact Unix domain socket path to use for connecting to Discord IPC (e.g. /run/user/1000/discord-ipc-0).</description>
+    </key>
+    <key name="connect-on-startup" type="b">
+      <default>false</default>
+      <summary>Connect on startup</summary>
+      <description>Whether to automatically attempt connection to the manual socket when the extension starts.</description>
+    </key>
+    <key name="panel-position" type="s">
+      <choices>
+        <choice value="right"/>
+        <choice value="center"/>
+        <choice value="left"/>
+      </choices>
+      <default>'right'</default>
+      <summary>Taskbar panel position</summary>
+      <description>Section of the GNOME top bar to place the indicator in ('left', 'center', or 'right').</description>
+    </key>
+    <key name="panel-index" type="i">
+      <default>0</default>
+      <summary>Taskbar position index</summary>
+      <description>Order index of the indicator within the panel section (0 is closest to the edge).</description>
+    </key>
+    <key name="taskbar-avatar-only" type="b">
+      <default>true</default>
+      <summary>Show only avatar in taskbar</summary>
+      <description>Display only circular avatars in the taskbar panel without text labels.</description>
+    </key>
+    <key name="taskbar-icon-size" type="i">
+      <default>28</default>
+      <summary>Taskbar icon size</summary>
+      <description>Size in pixels of the circular avatar icons in the taskbar panel.</description>
+    </key>
+    <key name="show-taskbar-participants" type="b">
+      <default>true</default>
+      <summary>Show voice participants in taskbar</summary>
+      <description>Display avatar icons for voice channel participants directly in the taskbar.</description>
+    </key>
+    <key name="taskbar-max-participants" type="i">
+      <default>3</default>
+      <summary>Maximum participant avatars in taskbar</summary>
+      <description>Maximum number of participant avatar icons to show in the taskbar.</description>
+    </key>
+    <key name="panel-display-mode" type="s">
+      <choices>
+        <choice value="avatars"/>
+        <choice value="pill"/>
+        <choice value="speaking-only"/>
+      </choices>
+      <default>'avatars'</default>
+      <summary>Panel display mode</summary>
+      <description>Display mode in the top bar: 'avatars' (show participant avatars), 'pill' (compact minimalist badge), or 'speaking-only' (only show participants when speaking).</description>
+    </key>
+    <key name="stealth-mode" type="b">
+      <default>false</default>
+      <summary>Stealth mode</summary>
+      <description>Automatically conceal the extension from the top bar completely when not connected to an active voice channel.</description>
+    </key>
+    <key name="speaking-glow-color" type="s">
+      <default>'#23a55a'</default>
+      <summary>Speaking glow color</summary>
+      <description>CSS color hex string for the real-time active speaking glow halo (e.g. #23a55a).</description>
+    </key>
+    <key name="mouse-middle-click-action" type="s">
+      <choices>
+        <choice value="toggle-mute"/>
+        <choice value="toggle-deaf"/>
+        <choice value="leave-channel"/>
+        <choice value="cycle-display-mode"/>
+        <choice value="toggle-menu"/>
+        <choice value="none"/>
+      </choices>
+      <default>'toggle-mute'</default>
+      <summary>Middle-click mouse action</summary>
+      <description>Action triggered by middle-clicking the panel indicator button.</description>
+    </key>
+    <key name="mouse-right-click-action" type="s">
+      <choices>
+        <choice value="leave-channel"/>
+        <choice value="toggle-mute"/>
+        <choice value="toggle-deaf"/>
+        <choice value="cycle-display-mode"/>
+        <choice value="toggle-menu"/>
+        <choice value="none"/>
+      </choices>
+      <default>'leave-channel'</default>
+      <summary>Right-click mouse action</summary>
+      <description>Action triggered by right-clicking the panel indicator button.</description>
+    </key>
+    <key name="mouse-scroll-action" type="s">
+      <choices>
+        <choice value="cycle-display-mode"/>
+        <choice value="toggle-mute"/>
+        <choice value="none"/>
+      </choices>
+      <default>'cycle-display-mode'</default>
+      <summary>Scroll wheel mouse action</summary>
+      <description>Action triggered by scrolling over the panel indicator button.</description>
+    </key>
+  </schema>
+</schemalist>

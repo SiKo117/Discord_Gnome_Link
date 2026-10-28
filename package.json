@@ -1,0 +1,19 @@
+{
+  "name": "discord-voice-panel",
+  "version": "1.0.0",
+  "description": "GNOME Shell extension for Discord Voice Status Panel",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/test_rpcProtocol.mjs && node tests/test_socketUtils.mjs && node tests/test_authFlow.mjs && node tests/test_avatarManager.mjs && node tests/test_participantLifecycle.mjs && node tests/test_newFeatures.mjs && node tests/test_auditFixes.mjs",
+    "mock": "node mock-discord-rpc.mjs",
+    "update": "bash update.sh"
+  },
+  "keywords": [
+    "gnome-shell-extension",
+    "discord",
+    "wayland",
+    "rpc"
+  ],
+  "author": "",
+  "license": "GPL-3.0-or-later"
+}
