@@ -773,18 +773,40 @@ export class DiscordRpcClient {
             this._speakingUsers.delete(userId);
         } else {
             // VOICE_STATE_CREATE or VOICE_STATE_UPDATE
-            const isMuted = Boolean(
+            // Distinguish participant's voice call state (speaking capability)
+            // from local client overrides (SET_USER_VOICE_SETTINGS: mute/volume)
+            const isVoiceMuted = Boolean(
                 eventData.voice_state?.mute ||
                 eventData.voice_state?.self_mute ||
-                eventData.mute ||
+                eventData.voice_state?.suppress ||
                 eventData.self_mute
             );
-            const isDeaf = Boolean(
+            const isVoiceDeaf = Boolean(
                 eventData.voice_state?.deaf ||
                 eventData.voice_state?.self_deaf ||
-                eventData.deaf ||
                 eventData.self_deaf
             );
+
+            // Local client mute override (SET_USER_VOICE_SETTINGS: mute)
+            // CRITICAL: Do NOT conflate participant self_mute with local mute!
+            const existingMember = existingIdx !== -1 ? voiceStates[existingIdx] : null;
+            let isLocallyMuted = false;
+            if (typeof eventData.mute === 'boolean') {
+                isLocallyMuted = eventData.mute;
+            } else if (typeof eventData.user_voice_settings?.mute === 'boolean') {
+                isLocallyMuted = eventData.user_voice_settings.mute;
+            } else if (existingMember && typeof existingMember.mute === 'boolean') {
+                isLocallyMuted = existingMember.mute;
+            }
+
+            let localVolume = 100;
+            if (typeof eventData.volume === 'number') {
+                localVolume = Math.round(eventData.volume);
+            } else if (typeof eventData.user_voice_settings?.volume === 'number') {
+                localVolume = Math.round(eventData.user_voice_settings.volume);
+            } else if (existingMember && typeof existingMember.volume === 'number') {
+                localVolume = Math.round(existingMember.volume);
+            }
 
             const normalizedMember = {
                 user: {
@@ -796,12 +818,14 @@ export class DiscordRpcClient {
                     bot: Boolean(rawUser.bot),
                 },
                 nick: eventData.nick || rawUser.global_name || null,
-                volume: typeof eventData.volume === 'number' ? eventData.volume : 100,
-                mute: isMuted,
-                deaf: isDeaf,
+                volume: localVolume,
+                mute: isLocallyMuted,
+                deaf: isVoiceDeaf,
+                voice_muted: isVoiceMuted,
+                voice_deaf: isVoiceDeaf,
                 voice_state: {
-                    mute: Boolean(eventData.voice_state?.mute ?? eventData.mute),
-                    deaf: Boolean(eventData.voice_state?.deaf ?? eventData.deaf),
+                    mute: Boolean(eventData.voice_state?.mute),
+                    deaf: Boolean(eventData.voice_state?.deaf),
                     self_mute: Boolean(eventData.voice_state?.self_mute ?? eventData.self_mute),
                     self_deaf: Boolean(eventData.voice_state?.self_deaf ?? eventData.self_deaf),
                     suppress: Boolean(eventData.voice_state?.suppress ?? eventData.suppress),
@@ -1244,7 +1268,21 @@ export class DiscordRpcClient {
         if (!this.isAuthenticated) {
             return Promise.reject(new Error('User voice settings require Discord authorization'));
         }
-        const args = { user_id: String(userId), ...settings };
+        const uidStr = String(userId);
+        const args = { user_id: uidStr, ...settings };
+
+        // Optimistically update cached participant state
+        if (this._currentVoiceChannel?.voice_states) {
+            const member = this._currentVoiceChannel.voice_states.find(m => {
+                const mId = String(m?.user?.id || m?.user_id || m?.id || '');
+                return mId === uidStr;
+            });
+            if (member) {
+                if (typeof settings.volume === 'number') member.volume = Math.round(settings.volume);
+                if (typeof settings.mute === 'boolean') member.mute = settings.mute;
+            }
+        }
+
         return this.sendCommand('SET_USER_VOICE_SETTINGS', args);
     }
 

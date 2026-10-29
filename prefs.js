@@ -143,9 +143,27 @@ export default class DiscordVoicePanelPreferences extends ExtensionPreferences {
         displayGroup.add(maxParticipantsRow);
         settings.bind('taskbar-max-participants', maxParticipantsRow, 'value', Gio.SettingsBindFlags.DEFAULT);
 
+        // Fixed Taskbar Participant Area Width SpinRow (QoL: Prevent Top Panel Jitter)
+        const fixedWidthRow = new Adw.SpinRow({
+            title: _('Fixed Participant Area Width'),
+            subtitle: _('Fixed constant width in pixels for taskbar participants to prevent expansion/collapsing jitter (0 = dynamic auto width)'),
+            adjustment: new Gtk.Adjustment({
+                lower: 0,
+                upper: 600,
+                step_increment: 4,
+                page_increment: 20,
+                value: settings.get_int('taskbar-fixed-width'),
+            }),
+        });
+        displayGroup.add(fixedWidthRow);
+        settings.bind('taskbar-fixed-width', fixedWidthRow, 'value', Gio.SettingsBindFlags.DEFAULT);
+
         maxParticipantsRow.set_sensitive(settings.get_boolean('show-taskbar-participants'));
+        fixedWidthRow.set_sensitive(settings.get_boolean('show-taskbar-participants'));
         participantsRow.connect('notify::active', () => {
-            maxParticipantsRow.set_sensitive(participantsRow.get_active());
+            const active = participantsRow.get_active();
+            maxParticipantsRow.set_sensitive(active);
+            fixedWidthRow.set_sensitive(active);
         });
 
         // Only profile picture in taskbar switch

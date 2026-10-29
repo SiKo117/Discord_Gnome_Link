@@ -155,7 +155,9 @@ export class AvatarManager {
             if (file.query_exists(null)) {
                 const info = file.query_info('standard::size', Gio.FileQueryInfoFlags.NONE, null);
                 const hasValidSize = info && info.get_size() > 0;
-                const exitSuccess = !proc.get_if_exited() || proc.get_exit_status() === 0;
+                const exitSuccess = typeof proc.get_successful === 'function'
+                    ? proc.get_successful()
+                    : (proc.get_if_exited() && proc.get_exit_status() === 0);
 
                 if (hasValidSize && exitSuccess) {
                     return targetPath;

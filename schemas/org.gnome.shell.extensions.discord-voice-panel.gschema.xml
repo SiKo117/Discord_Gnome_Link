@@ -66,6 +66,11 @@
       <summary>Maximum participant avatars in taskbar</summary>
       <description>Maximum number of participant avatar icons to show in the taskbar.</description>
     </key>
+    <key name="taskbar-fixed-width" type="i">
+      <default>96</default>
+      <summary>Fixed taskbar participant area width</summary>
+      <description>Constant fixed width in pixels for the taskbar participant avatar area to prevent horizontal panel expansion and collapsing jitter (default 96px for 3 avatars; set to 0 for auto/dynamic sizing).</description>
+    </key>
     <key name="panel-display-mode" type="s">
       <choices>
         <choice value="avatars"/>

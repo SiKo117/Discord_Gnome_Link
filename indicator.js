@@ -8,6 +8,8 @@ import { gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.j
 import { formatSocketName } from './socketUtils.js';
 import { getAvatarManager, AvatarWidget } from './avatarManager.js';
 
+export const DEFAULT_TASKBAR_FIXED_WIDTH = 96;
+
 export const DiscordVoiceIndicator = GObject.registerClass(
 class DiscordVoiceIndicator extends PanelMenu.Button {
     _init(extension, rpcClient) {
@@ -15,16 +17,21 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
 
         // GNOME Shell 47-51 Compatibility:
         // PanelMenu.Button sets up this._clickGesture with default required_button = 0 (any button).
-        // Restrict this._clickGesture strictly to primary click (button 1) so buttons 2 and 3 do not toggle menu.
-        if (this._clickGesture) {
-            if (typeof this._clickGesture.set_required_button === 'function') {
-                this._clickGesture.set_required_button(1);
+        // Restrict click gesture strictly to primary click (button 1) so buttons 2 and 3 do not toggle menu.
+        const clickGesture = this._clickGesture ||
+            (this.get_actions ? this.get_actions().find(a => a instanceof Clutter.ClickGesture) : null);
+        if (clickGesture) {
+            const primaryBtn = Clutter.BUTTON_PRIMARY ?? 1;
+            if (typeof clickGesture.set_required_button === 'function') {
+                clickGesture.set_required_button(primaryBtn);
             } else {
                 try {
-                    this._clickGesture.required_button = 1;
+                    clickGesture.required_button = primaryBtn;
                 } catch (_) {}
             }
         }
+
+        this._destroyed = false;
 
         this._extension = extension;
         this._settings = extension.getSettings();
@@ -73,6 +80,16 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
         return Math.max(16, Math.min(48, this._settings?.get_int('taskbar-icon-size') || 28));
     }
 
+    _getTaskbarFixedWidth() {
+        if (!this._settings) return DEFAULT_TASKBAR_FIXED_WIDTH;
+        try {
+            const val = this._settings.get_int('taskbar-fixed-width');
+            return Math.max(0, val);
+        } catch (_) {
+            return DEFAULT_TASKBAR_FIXED_WIDTH;
+        }
+    }
+
     /**
      * Build the taskbar indicator.
      * Supports Avatar mode, Participant avatars, and Minimalist Pill mode.
@@ -93,10 +110,11 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
         });
         this._panelBox.add_child(this._taskbarAvatar);
 
-        // Container for other voice participants' avatars
+        // Container for other voice participants' avatars (fixed constant width prevents taskbar jitter)
         this._taskbarParticipantsBox = new St.BoxLayout({
             style_class: 'discord-taskbar-participants-box',
             y_align: Clutter.ActorAlign.CENTER,
+            x_align: Clutter.ActorAlign.START,
         });
         this._panelBox.add_child(this._taskbarParticipantsBox);
 
@@ -604,6 +622,7 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
                 key === 'taskbar-icon-size' ||
                 key === 'show-taskbar-participants' ||
                 key === 'taskbar-max-participants' ||
+                key === 'taskbar-fixed-width' ||
                 key === 'manual-socket-path' ||
                 key === 'panel-display-mode' ||
                 key === 'stealth-mode' ||
@@ -964,11 +983,12 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
     }
 
     async _refreshChannelSubMenu(guildId, currentChannelId) {
-        if (!this._channelSubMenu || !guildId) return;
+        if (this._destroyed || !this._channelSubMenu || !guildId) return;
         this._channelSubMenu.visible = true;
 
         try {
             const channels = await this._rpc.getChannels(guildId);
+            if (this._destroyed || !this._channelSubMenu) return;
             this._channelSubMenu.menu.removeAll();
 
             const voiceChannels = (channels || []).filter(c => c && (c.type === 2 || c.type === 13));
@@ -1051,6 +1071,7 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
         const stealthMode = this._settings?.get_boolean('stealth-mode') ?? false;
         const showDisconnected = this._settings?.get_boolean('show-disconnected-icon') ?? true;
         const iconSize = this._getTaskbarIconSize();
+        const fixedWidth = this._getTaskbarFixedWidth();
 
         if (this._taskbarAvatar) {
             this._taskbarAvatar.setSize(iconSize);
@@ -1117,7 +1138,20 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
 
             // Normal / Speaking-Only Avatars Mode
             if (this._pillBox) this._pillBox.visible = false;
-            if (this._taskbarParticipantsBox) this._taskbarParticipantsBox.visible = true;
+
+            if (this._taskbarParticipantsBox) {
+                const showPartBox = Boolean(showParticipants);
+                this._taskbarParticipantsBox.visible = showPartBox;
+                if (showPartBox) {
+                    if (fixedWidth > 0) {
+                        this._taskbarParticipantsBox.set_width(fixedWidth);
+                        this._taskbarParticipantsBox.clip_to_allocation = true;
+                    } else {
+                        this._taskbarParticipantsBox.set_width(-1);
+                        this._taskbarParticipantsBox.clip_to_allocation = false;
+                    }
+                }
+            }
             if (this._taskbarAvatar) {
                 this._taskbarAvatar.visible = true;
                 if (isDeaf) {
@@ -1357,16 +1391,17 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
                 });
 
                 // Participant Profile Picture Avatar (30px)
-                const isMuted = Boolean(
+                const isVoiceMuted = Boolean(
+                    member.voice_muted ||
                     member.voice_state?.mute ||
                     member.voice_state?.self_mute ||
-                    member.mute ||
+                    member.voice_state?.suppress ||
                     member.self_mute
                 );
-                const isDeaf = Boolean(
+                const isVoiceDeaf = Boolean(
+                    member.voice_deaf ||
                     member.voice_state?.deaf ||
                     member.voice_state?.self_deaf ||
-                    member.deaf ||
                     member.self_deaf
                 );
 
@@ -1374,7 +1409,7 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
 
                 const memberAvatar = new AvatarWidget(this._avatarManager, 30, {
                     style_class: 'discord-member-avatar-widget',
-                    borderColor: isDeaf ? '#f0b232' : (isMuted ? '#f23f43' : '#23a55a'),
+                    borderColor: isVoiceDeaf ? '#f0b232' : (isVoiceMuted ? '#f23f43' : '#23a55a'),
                     glowColor,
                 });
                 memberAvatar.setUser(userObj);
@@ -1432,7 +1467,7 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
                 rowBox.add_child(nameColumn);
 
                 // Audio State Badges on Right
-                if (isMuted) {
+                if (isVoiceMuted) {
                     const muteIcon = new St.Icon({
                         icon_name: 'audio-input-microphone-muted-symbolic',
                         style_class: 'discord-member-badge is-muted',
@@ -1441,7 +1476,7 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
                     rowBox.add_child(muteIcon);
                 }
 
-                if (isDeaf) {
+                if (isVoiceDeaf) {
                     const deafIcon = new St.Icon({
                         icon_name: 'audio-volume-muted-symbolic',
                         style_class: 'discord-member-badge is-deaf',
@@ -1486,16 +1521,44 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
                         x_expand: true,
                     });
 
-                    const volIcon = new St.Icon({
-                        icon_name: 'audio-volume-high-symbolic',
-                        icon_size: 14,
+                    // 1. Current Volume (integer 0-200, strictly rounded)
+                    let currentVolume = 100;
+                    if (this._userVolumeSettings.has(userId) && typeof this._userVolumeSettings.get(userId).volume === 'number') {
+                        currentVolume = Math.round(this._userVolumeSettings.get(userId).volume);
+                    } else if (typeof member.volume === 'number') {
+                        currentVolume = Math.round(member.volume);
+                    }
+                    currentVolume = Math.max(0, Math.min(200, currentVolume));
+
+                    // 2. Local Mute State (only true if user explicitly muted participant locally)
+                    let isUserMuted = false;
+                    if (this._userVolumeSettings.has(userId) && typeof this._userVolumeSettings.get(userId).mute === 'boolean') {
+                        isUserMuted = this._userVolumeSettings.get(userId).mute;
+                    } else if (typeof member.mute === 'boolean') {
+                        isUserMuted = member.mute;
+                    }
+
+                    // 3. Interactive Speaker Button (Mute / Unmute Toggle)
+                    const speakerIcon = new St.Icon({
+                        icon_name: isUserMuted
+                            ? 'audio-volume-muted-symbolic'
+                            : (currentVolume === 0
+                                ? 'audio-volume-muted-symbolic'
+                                : (currentVolume > 100 ? 'audio-volume-overamplified-symbolic' : 'audio-volume-high-symbolic')),
+                        icon_size: 15,
                     });
-                    controlsRow.add_child(volIcon);
 
-                    let currentVolume = this._userVolumeSettings.get(userId)?.volume ?? (typeof member.volume === 'number' ? member.volume : 100);
-                    let isUserMuted = this._userVolumeSettings.get(userId)?.mute ?? Boolean(member.mute);
+                    const speakerMuteBtn = new St.Button({
+                        style_class: isUserMuted
+                            ? 'discord-member-speaker-btn is-muted'
+                            : 'discord-member-speaker-btn',
+                        can_focus: true,
+                        child: speakerIcon,
+                        y_align: Clutter.ActorAlign.CENTER,
+                    });
+                    controlsRow.add_child(speakerMuteBtn);
 
-                    // Slider (0.0 to 1.0 represents 0% to 200%)
+                    // 4. Volume Slider (0.0 to 1.0 represents 0% to 200%)
                     const sliderVal = Math.min(1.0, Math.max(0.0, currentVolume / 200.0));
                     let slider = null;
                     try {
@@ -1508,35 +1571,35 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
                         }
                     }
 
+                    if (slider) {
+                        slider.x_expand = true;
+                        slider.y_align = Clutter.ActorAlign.CENTER;
+                        slider.add_style_class_name('discord-volume-slider');
+                        slider.accessible_name = _('Participant Volume');
+                        if (typeof slider.addMark === 'function') {
+                            try {
+                                slider.addMark(0.5);
+                            } catch (_) {}
+                        }
+                        controlsRow.add_child(slider);
+                    }
+
+                    // 5. Clean Integer Volume Percentage Label (No Decimals)
                     const volLabel = new St.Label({
                         text: `${currentVolume}%`,
                         style_class: 'discord-volume-label',
                         y_align: Clutter.ActorAlign.CENTER,
                     });
-
-                    if (slider) {
-                        slider.x_expand = true;
-                        slider.style_class = 'discord-volume-slider';
-                        controlsRow.add_child(slider);
-                    }
-
                     controlsRow.add_child(volLabel);
 
+                    // 6. "100%" Set / Reset Button
                     const resetBtn = new St.Button({
                         style_class: 'discord-volume-btn',
                         label: '100%',
                         can_focus: true,
+                        y_align: Clutter.ActorAlign.CENTER,
                     });
                     controlsRow.add_child(resetBtn);
-
-                    const userMuteBtn = new St.Button({
-                        style_class: isUserMuted
-                            ? 'discord-member-mute-toggle is-muted'
-                            : 'discord-member-mute-toggle',
-                        label: isUserMuted ? _('Unmute') : _('Mute'),
-                        can_focus: true,
-                    });
-                    controlsRow.add_child(userMuteBtn);
 
                     controlsContainer.add_child(controlsRow);
 
@@ -1549,31 +1612,66 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
                     this._memberSection.addMenuItem(controlsItem);
                     controlsItem.visible = isExpanded;
 
-                    if (expandBtn) {
-                        expandBtn.connect('clicked', () => {
-                            const isExp = !this._expandedUsers.has(userId);
-                            if (isExp) {
-                                this._expandedUsers.add(userId);
-                                expandBtn.label = '▴';
-                                controlsContainer.visible = true;
-                                controlsItem.visible = true;
+                    const updateSpeakerAppearance = () => {
+                        if (isUserMuted) {
+                            speakerIcon.icon_name = 'audio-volume-muted-symbolic';
+                            speakerMuteBtn.add_style_class_name('is-muted');
+                        } else {
+                            speakerMuteBtn.remove_style_class_name('is-muted');
+                            const curVol = slider ? Math.round(slider.value * 200) : currentVolume;
+                            if (curVol === 0) {
+                                speakerIcon.icon_name = 'audio-volume-muted-symbolic';
+                            } else if (curVol > 100) {
+                                speakerIcon.icon_name = 'audio-volume-overamplified-symbolic';
                             } else {
-                                this._expandedUsers.delete(userId);
-                                expandBtn.label = '▾';
-                                controlsContainer.visible = false;
-                                controlsItem.visible = false;
+                                speakerIcon.icon_name = 'audio-volume-high-symbolic';
                             }
-                        });
+                        }
+                    };
+
+                    const toggleExpand = () => {
+                        const isExp = !this._expandedUsers.has(userId);
+                        if (isExp) {
+                            this._expandedUsers.add(userId);
+                            if (expandBtn) expandBtn.label = '▴';
+                            controlsContainer.visible = true;
+                            controlsItem.visible = true;
+                        } else {
+                            this._expandedUsers.delete(userId);
+                            if (expandBtn) expandBtn.label = '▾';
+                            controlsContainer.visible = false;
+                            controlsItem.visible = false;
+                        }
+                    };
+
+                    if (expandBtn) {
+                        expandBtn.connect('clicked', toggleExpand);
                     }
+
+                    memberItem.connect('activate', toggleExpand);
+
+                    speakerMuteBtn.connect('clicked', () => {
+                        isUserMuted = !isUserMuted;
+                        const volVal = slider ? Math.round(slider.value * 200) : currentVolume;
+                        this._userVolumeSettings.set(userId, {
+                            volume: volVal,
+                            mute: isUserMuted,
+                        });
+                        updateSpeakerAppearance();
+                        this._rpc.setUserVoiceSettings(userId, { mute: isUserMuted }).catch(e => {
+                            console.warn(`[DiscordVoice] Failed to toggle user mute: ${e.message}`);
+                        });
+                    });
 
                     if (slider) {
                         slider.connect('notify::value', () => {
-                            const volPercent = Math.round(slider.value * 200);
+                            const volPercent = Math.max(0, Math.min(200, Math.round(slider.value * 200)));
                             volLabel.text = `${volPercent}%`;
                             this._userVolumeSettings.set(userId, {
                                 volume: volPercent,
                                 mute: isUserMuted,
                             });
+                            updateSpeakerAppearance();
                             this._rpc.setUserVoiceSettings(userId, { volume: volPercent }).catch(e => {
                                 console.warn(`[DiscordVoice] Failed to set user volume: ${e.message}`);
                             });
@@ -1585,31 +1683,14 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
                             slider.value = 0.5; // 100%
                         }
                         volLabel.text = '100%';
+                        currentVolume = 100;
                         this._userVolumeSettings.set(userId, {
                             volume: 100,
                             mute: isUserMuted,
                         });
+                        updateSpeakerAppearance();
                         this._rpc.setUserVoiceSettings(userId, { volume: 100 }).catch(e => {
                             console.warn(`[DiscordVoice] Failed to reset user volume: ${e.message}`);
-                        });
-                    });
-
-                    userMuteBtn.connect('clicked', () => {
-                        isUserMuted = !isUserMuted;
-                        const volVal = slider ? Math.round(slider.value * 200) : currentVolume;
-                        this._userVolumeSettings.set(userId, {
-                            volume: volVal,
-                            mute: isUserMuted,
-                        });
-                        if (isUserMuted) {
-                            userMuteBtn.add_style_class_name('is-muted');
-                            userMuteBtn.label = _('Unmute');
-                        } else {
-                            userMuteBtn.remove_style_class_name('is-muted');
-                            userMuteBtn.label = _('Mute');
-                        }
-                        this._rpc.setUserVoiceSettings(userId, { mute: isUserMuted }).catch(e => {
-                            console.warn(`[DiscordVoice] Failed to toggle user mute: ${e.message}`);
                         });
                     });
                 }
@@ -1630,6 +1711,7 @@ class DiscordVoiceIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        this._destroyed = true;
         if (this._menuOpenId) {
             this.menu.disconnect(this._menuOpenId);
             this._menuOpenId = null;

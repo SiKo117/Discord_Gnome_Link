@@ -849,4 +849,247 @@ const Clutter = {
     console.log('✓ Test 7: Mock Discord RPC speaking frame handling verified');
 }
 
+// =========================================================================
+// Test 8: Fixed Constant Participant Area Width (Anti-Jitter QoL)
+// =========================================================================
+{
+    console.log('Testing 8: Fixed Taskbar Participant Area Width (Anti-Jitter QoL)...');
+
+    const DEFAULT_TASKBAR_FIXED_WIDTH = 96;
+
+    class MockTaskbarBox {
+        constructor() {
+            this.width = -1;
+            this.clip_to_allocation = false;
+            this.visible = false;
+            this._children = [];
+        }
+        set_width(w) {
+            this.width = w;
+        }
+        add_child(child) {
+            this._children.push(child);
+        }
+        remove_child(child) {
+            const idx = this._children.indexOf(child);
+            if (idx >= 0) this._children.splice(idx, 1);
+        }
+        get_children() {
+            return [...this._children];
+        }
+        destroy_all_children() {
+            this._children = [];
+        }
+    }
+
+    class MockIndicatorAntiJitter {
+        constructor(settings = {}) {
+            this._settings = new Map(Object.entries({
+                'show-taskbar-participants': true,
+                'taskbar-fixed-width': DEFAULT_TASKBAR_FIXED_WIDTH,
+                'panel-display-mode': 'speaking-only',
+                ...settings,
+            }));
+            this._taskbarParticipantsBox = new MockTaskbarBox();
+            this.speakingUsers = new Set();
+        }
+
+        _getTaskbarFixedWidth() {
+            return Math.max(0, this._settings.get('taskbar-fixed-width') ?? DEFAULT_TASKBAR_FIXED_WIDTH);
+        }
+
+        updateTopBarVisuals(channel) {
+            const showParticipants = this._settings.get('show-taskbar-participants');
+            const displayMode = this._settings.get('panel-display-mode');
+            const fixedWidth = this._getTaskbarFixedWidth();
+
+            if (!channel) {
+                this._taskbarParticipantsBox.visible = false;
+                this._taskbarParticipantsBox.destroy_all_children();
+                return;
+            }
+
+            if (displayMode === 'pill') {
+                this._taskbarParticipantsBox.visible = false;
+                return;
+            }
+
+            const showPartBox = Boolean(showParticipants);
+            this._taskbarParticipantsBox.visible = showPartBox;
+            if (showPartBox) {
+                if (fixedWidth > 0) {
+                    this._taskbarParticipantsBox.set_width(fixedWidth);
+                    this._taskbarParticipantsBox.clip_to_allocation = true;
+                } else {
+                    this._taskbarParticipantsBox.set_width(-1);
+                    this._taskbarParticipantsBox.clip_to_allocation = false;
+                }
+            }
+
+            // In speaking-only mode, only add children for active speakers
+            const members = channel.voice_states || [];
+            this._taskbarParticipantsBox.destroy_all_children();
+            for (const m of members) {
+                if (displayMode === 'speaking-only' && !this.speakingUsers.has(m.id)) {
+                    continue;
+                }
+                this._taskbarParticipantsBox.add_child({ id: m.id });
+            }
+        }
+    }
+
+    const indicator = new MockIndicatorAntiJitter();
+    const mockChannel = {
+        id: 'voice_ch_1',
+        voice_states: [{ id: 'user_a' }, { id: 'user_b' }, { id: 'user_c' }],
+    };
+
+    // 1. In voice channel, before anyone speaks (0 speakers)
+    indicator.updateTopBarVisuals(mockChannel);
+    assert.strictEqual(indicator._taskbarParticipantsBox.visible, true, 'Box is visible in channel');
+    assert.strictEqual(indicator._taskbarParticipantsBox.width, 96, 'Constant width held at default 96px with 0 speakers');
+    assert.strictEqual(indicator._taskbarParticipantsBox.clip_to_allocation, true);
+    assert.strictEqual(indicator._taskbarParticipantsBox._children.length, 0);
+
+    // 2. User A starts speaking -> 1 speaker avatar added, width remains locked at 96px
+    indicator.speakingUsers.add('user_a');
+    indicator.updateTopBarVisuals(mockChannel);
+    assert.strictEqual(indicator._taskbarParticipantsBox._children.length, 1);
+    assert.strictEqual(indicator._taskbarParticipantsBox.width, 96, 'Width stays fixed at 96px (NO EXPANSION JITTER)');
+
+    // 3. User B also starts speaking -> 2 speakers, width remains locked at 96px
+    indicator.speakingUsers.add('user_b');
+    indicator.updateTopBarVisuals(mockChannel);
+    assert.strictEqual(indicator._taskbarParticipantsBox._children.length, 2);
+    assert.strictEqual(indicator._taskbarParticipantsBox.width, 96, 'Width stays fixed at 96px with multiple speakers');
+
+    // 4. User A stops speaking -> 1 speaker, width remains locked at 96px
+    indicator.speakingUsers.delete('user_a');
+    indicator.updateTopBarVisuals(mockChannel);
+    assert.strictEqual(indicator._taskbarParticipantsBox._children.length, 1);
+    assert.strictEqual(indicator._taskbarParticipantsBox.width, 96, 'Width stays fixed at 96px (NO COLLAPSING JITTER)');
+
+    // 5. User adjusts fixed width setting to 140px in preferences
+    indicator._settings.set('taskbar-fixed-width', 140);
+    indicator.updateTopBarVisuals(mockChannel);
+    assert.strictEqual(indicator._taskbarParticipantsBox.width, 140, 'Width updates to user-adjusted value (140px)');
+
+    // 6. User sets fixed width to 0 (dynamic auto-sizing mode)
+    indicator._settings.set('taskbar-fixed-width', 0);
+    indicator.updateTopBarVisuals(mockChannel);
+    assert.strictEqual(indicator._taskbarParticipantsBox.width, -1, 'Width reverts to -1 (natural sizing) when set to 0');
+    assert.strictEqual(indicator._taskbarParticipantsBox.clip_to_allocation, false);
+
+    // 7. Leaving voice channel collapses visibility
+    indicator.updateTopBarVisuals(null);
+    assert.strictEqual(indicator._taskbarParticipantsBox.visible, false, 'Box hidden when leaving channel');
+
+    console.log('✓ Test 8: Fixed Taskbar Participant Area Width (Anti-Jitter QoL) passed');
+}
+
+// =========================================================================
+// Test 9: Participant Self-Mute vs Local-Mute Separation & Volume Rounding
+// =========================================================================
+{
+    console.log('Testing 9: Participant Self-Mute vs Local-Mute Separation & Volume Precision...');
+
+    // Simulate voice state normalization logic from discordRpc.js
+    function normalizeMemberState(existingMember, eventData) {
+        const rawUser = eventData.user || {};
+        const userId = String(rawUser.id || eventData.user_id || eventData.id || '');
+
+        const isVoiceMuted = Boolean(
+            eventData.voice_state?.mute ||
+            eventData.voice_state?.self_mute ||
+            eventData.voice_state?.suppress ||
+            eventData.self_mute
+        );
+        const isVoiceDeaf = Boolean(
+            eventData.voice_state?.deaf ||
+            eventData.voice_state?.self_deaf ||
+            eventData.self_deaf
+        );
+
+        let isLocallyMuted = false;
+        if (typeof eventData.mute === 'boolean') {
+            isLocallyMuted = eventData.mute;
+        } else if (typeof eventData.user_voice_settings?.mute === 'boolean') {
+            isLocallyMuted = eventData.user_voice_settings.mute;
+        } else if (existingMember && typeof existingMember.mute === 'boolean') {
+            isLocallyMuted = existingMember.mute;
+        }
+
+        let localVolume = 100;
+        if (typeof eventData.volume === 'number') {
+            localVolume = Math.round(eventData.volume);
+        } else if (typeof eventData.user_voice_settings?.volume === 'number') {
+            localVolume = Math.round(eventData.user_voice_settings.volume);
+        } else if (existingMember && typeof existingMember.volume === 'number') {
+            localVolume = Math.round(existingMember.volume);
+        }
+
+        return {
+            user: { id: userId, username: rawUser.username || 'User' },
+            volume: localVolume,
+            mute: isLocallyMuted,
+            voice_muted: isVoiceMuted,
+            voice_deaf: isVoiceDeaf,
+            voice_state: {
+                mute: Boolean(eventData.voice_state?.mute),
+                deaf: Boolean(eventData.voice_state?.deaf),
+                self_mute: Boolean(eventData.voice_state?.self_mute ?? eventData.self_mute),
+                self_deaf: Boolean(eventData.voice_state?.self_deaf ?? eventData.self_deaf),
+                suppress: Boolean(eventData.voice_state?.suppress ?? eventData.suppress),
+            },
+        };
+    }
+
+    // Scenario A: Participant Bob mutes HIMSELF in Discord
+    const bobSelfMuteEvent = {
+        user: { id: 'bob_user_id', username: 'Bob' },
+        voice_state: {
+            mute: false,       // Server mute is false
+            deaf: false,
+            self_mute: true,   // Bob muted himself
+            self_deaf: false,
+            suppress: false,
+        },
+        volume: 83.33333333333333, // Discord RPC float volume
+        mute: false,               // Current user did NOT locally mute Bob
+    };
+
+    const normalizedBob = normalizeMemberState(null, bobSelfMuteEvent);
+
+    // 1. Voice state indicates Bob is muted in call (shows mic badge and border)
+    assert.strictEqual(normalizedBob.voice_muted, true, 'Bob should be detected as voice_muted');
+    assert.strictEqual(normalizedBob.voice_state.self_mute, true, 'Bob self_mute should be true');
+
+    // 2. CRITICAL BUG FIX: Local mute must be FALSE! Mute button must NOT show "Unmute"
+    assert.strictEqual(normalizedBob.mute, false, 'Local mute must remain FALSE when participant self-mutes');
+
+    // 3. CRITICAL DECIMAL FIX: Floating-point volume must be strictly rounded to clean integer
+    assert.strictEqual(normalizedBob.volume, 83, 'Volume 83.33333333333333 must be rounded to integer 83');
+
+    // Scenario B: Current user toggles mute on Bob locally via speaker icon button
+    const userMutedBobEvent = {
+        ...bobSelfMuteEvent,
+        mute: true, // Current user clicked mute on Bob
+    };
+    const locallyMutedBob = normalizeMemberState(normalizedBob, userMutedBobEvent);
+    assert.strictEqual(locallyMutedBob.mute, true, 'Local mute becomes TRUE when user explicitly mutes Bob');
+
+    // Scenario C: Slider math & formatting
+    const sliderVal = Math.min(1.0, Math.max(0.0, normalizedBob.volume / 200.0));
+    assert.strictEqual(sliderVal, 83 / 200);
+    const displayedPercent = `${Math.round(sliderVal * 200)}%`;
+    assert.strictEqual(displayedPercent, '83%', 'Label text is clean integer percentage without decimals');
+
+    // Scenario D: Reset button to 100%
+    const resetSliderVal = 0.5;
+    const resetPercent = `${Math.round(resetSliderVal * 200)}%`;
+    assert.strictEqual(resetPercent, '100%');
+
+    console.log('✓ Test 9: Participant Self-Mute vs Local-Mute Separation & Volume Precision passed');
+}
+
 console.log('All audit & regression fixes unit tests passed successfully!');
